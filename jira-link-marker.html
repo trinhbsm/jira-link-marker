@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Jira Ticket Link Marker</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      margin-top: 30px;
+      background: #e1d9d9;
+    }
+    .container {
+      max-width: 600px;
+      width: 100%;
+      text-align: center;
+    }
+    label {
+      display: block;
+      text-align: left;
+      font-weight: 600;
+      margin-top: 15px;
+    }
+    textarea {
+      width: 100%;
+      height: 150px;
+      padding: 8px;
+      font-family: monospace;
+      font-size: 14px;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      font-size: 14px;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .row > div {
+      flex: 1;
+    }
+    #outputWrapper {
+      margin-top: 25px;
+      text-align: left;
+    }
+    #copyArea {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    #copyBtn {
+      cursor: pointer;
+      background: #f0f0f0;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    #copyBtn:hover {
+      background: #e2e2e2;
+    }
+    #copyStatus {
+      font-size: 13px;
+      color: #2b7a2b;
+    }
+    #output {
+      padding: 15px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      background: #fafafa;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    a {
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <label for="text">Text</label>
+    <textarea id="text">Worked on:
+- 
+
+Blockers:
+- 
+
+Next working day:
+- 
+</textarea>
+
+    <div class="row">
+      <div>
+        <label for="projectCodes">Project Codes</label>
+        <input type="text" id="projectCodes" value="POS,FS,CITI,INFOSEC,SD,MTX" />
+      </div>
+      <div>
+        <label for="date">Date</label>
+        <input type="text" id="date" />
+      </div>
+    </div>
+
+    <div id="outputWrapper">
+      <div id="copyArea">
+        <button id="copyBtn">📋 Copy</button>
+        <span id="copyStatus"></span>
+      </div>
+      <div id="output"></div>
+    </div>
+  </div>
+
+  <script>
+    const textEl = document.getElementById('text');
+    const codesEl = document.getElementById('projectCodes');
+    const dateEl = document.getElementById('date');
+    const outputEl = document.getElementById('output');
+    const copyBtn = document.getElementById('copyBtn');
+    const copyStatus = document.getElementById('copyStatus');
+
+    const today = new Date();
+    dateEl.value = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
+
+    function escapeHtml(s) {
+      return s.replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;')
+              .replace(/'/g, '&#39;');
+    }
+
+    function getDayOfWeek(dateStr) {
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const d = new Date(dateStr);
+      if (isNaN(d)) return '';
+      return days[d.getDay()];
+    }
+
+    function buildReportHtml() {
+      let raw = textEl.value || '';
+      const codes = codesEl.value.split(',').map(c => c.trim()).filter(Boolean);
+      const date = dateEl.value || '';
+      const dayName = getDayOfWeek(date);
+
+      // Escape first
+      let html = escapeHtml(raw);
+
+      // Preserve full Jira URLs
+      const urlRegex = /https:\/\/besmartee\.atlassian\.net\/browse\/[A-Za-z]+-\d+(?:\?[^\s]*)?/g;
+      const urls = [];
+      html = html.replace(urlRegex, (m) => {
+        const key = `%%JIRA_URL_${urls.length}%%`;
+        urls.push(m);
+        return key;
+      });
+
+      // Replace plain ticket codes with anchors
+      if (codes.length > 0) {
+        const pattern = new RegExp(`\\b(${codes.join('|')})-\\d+\\b`, 'gi');
+        html = html.replace(pattern, (match) => {
+          const ticket = match.toUpperCase();
+          const href = `https://besmartee.atlassian.net/browse/${ticket}`;
+          return `<a href="${href}" target="_blank">${match}</a>`;
+        });
+      }
+
+      // Restore Jira URLs untouched
+      urls.forEach((orig, i) => {
+        const key = `%%JIRA_URL_${i}%%`;
+        html = html.replace(key, escapeHtml(orig));
+      });
+
+      // Make key section labels bold (case-insensitive)
+      html = html.replace(
+        /(^|\n)(\s*)(Worked on:|Blockers:|Next working day:)/gi,
+        (m, p1, p2, label) => `${p1}${p2}<strong>${label}</strong>`
+      );
+
+      // Always append a blank line
+      if (!html.endsWith('\n')) html += '\n';
+
+      const displayDate = dayName ? `${dayName}, ${escapeHtml(date)}` : escapeHtml(date);
+      const reportHtml = `<strong>Daily Work Report (${displayDate})</strong>\n\n${html}\n`;
+
+      return reportHtml;
+    }
+
+    function renderOutput() {
+      const reportHtml = buildReportHtml();
+      outputEl.innerHTML = reportHtml.replace(/\n/g, '<br>');
+    }
+
+    async function copyReport() {
+      const htmlReport = buildReportHtml().replace(/\n/g, '<br>');
+      const plainText = outputEl.innerText.trim();
+
+      try {
+        if (navigator.clipboard && window.ClipboardItem) {
+          const item = new ClipboardItem({
+            'text/html': new Blob([htmlReport], { type: 'text/html' }),
+            'text/plain': new Blob([plainText], { type: 'text/plain' })
+          });
+          await navigator.clipboard.write([item]);
+        } else {
+          await navigator.clipboard.writeText(plainText);
+        }
+        copyStatus.textContent = 'Copied!';
+        setTimeout(() => copyStatus.textContent = '', 1500);
+      } catch (err) {
+        console.error(err);
+        alert('Copy failed. Try manually selecting and copying.');
+      }
+    }
+
+    textEl.addEventListener('keyup', renderOutput);
+    dateEl.addEventListener('keyup', renderOutput);
+    codesEl.addEventListener('keyup', renderOutput);
+    copyBtn.addEventListener('click', copyReport);
+
+    renderOutput();
+  </script>
+</body>
+</html>
